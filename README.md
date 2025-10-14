@@ -1,7 +1,7 @@
 # gains-and-losses
-Options trading, algorithmic trading, blackjack, poker, game theory, all in one place.
+Options trading, algorithmic trading, blackjack, poker, game theory, all in one place. 
 
-Documentation of research in the above fields, code implentation to explore more.
+I watch YouTube videos and read books about these things instead of doing homework; this is my documentation of research in the above fields, code implentation to explore more.
 
 
 Options Trading / Day Trading
@@ -19,3 +19,5 @@ Blackjack
 
 
 Poker
+- pot odds
+- btetting patters

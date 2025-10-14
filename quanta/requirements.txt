@@ -1,0 +1,15 @@
+pandas
+yfinance
+pandas-datareader
+pandas-market-calendars
+holidays
+pandas-ta
+numpy
+statsmodels
+setuptools
+packaging
+more-itertools
+seaborn
+matplotlib
+tensorflow
+scikit-learn
