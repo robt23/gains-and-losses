@@ -5,9 +5,11 @@ I watch YouTube videos and read books about these things instead of doing homewo
 
 
 Options Trading / Day Trading
+- options pricing & trading strategy 
 
 
-Algorithmic Trading / Quantitative Trading
+Algorithmic / Quantitative Trading
+- statistical arbitrage & pairs trading
 
 
 Blackjack
@@ -20,4 +22,4 @@ Blackjack
 
 Poker
 - pot odds
-- btetting patters
+- betting patters
