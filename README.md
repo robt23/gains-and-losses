@@ -8,7 +8,7 @@ Options Trading / Day Trading
 
 
 Algorithmic Trading / Quantitative Trading
-
+![alt text](pairs_trading_plots.png)
 
 Blackjack
 - basic strategy

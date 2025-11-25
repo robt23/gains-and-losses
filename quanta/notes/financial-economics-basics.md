@@ -3,6 +3,7 @@
 
 ## Terminology
 
+
 ### Assets
 - **Stocks**: ownership shares in a company; when you buy a stock, you own a portion of that company and may receive dividends and/or capital gains
 - **Equity**: another word for ownership in an asset, typically a company; in finance, equity refers to stock shares or the net value of an asset after subtracting liabilities
@@ -31,6 +32,7 @@ point i.e. 0.01%
 - **Yield**: income (usually interest) you earn from an investment expressed as a percentage of its cost or value
 - **Revenue**: total amount of money a company earns i.e. $\text{Price} \times \text{Quantity}$
 - **Profit**: net income after subtracting expenses i.e. $\text{Revenue} - \text{Total Expenses}$
+- **Cost Basis**: original value of an investment, including the purchase price and any associated costs like commissions or fees
 
 
 
@@ -47,6 +49,3 @@ $\text{P/E Ratio} = \frac{\text{Price per Share}}{\text{Earnings per Share (EPS)
 - high P/E ~ high market expectations, low P/E ~ cheap stock/company decline
 - useful for comparing companies int he same sector, screening value & growth stocks, over/under-valuation
 - can be misleading if earnings are volatile or manipulated
-
-
-### Options

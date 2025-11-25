@@ -11,29 +11,11 @@ Other sources:
 
 
 
-## Terminology
+## Terminology, Concepts
 
 ### Greeks
 - **Alpha**: excess return of a strategy or investment relative to a benchmark (e.g. S&P 500); positive means outperform, negative means underperform
 - **Beta**: systematic risk i.e. how much a security moves relative to overall market; =1 moves in-sync with market, >1 more volatile, <1 less volative
-- **Delta**: how much an option's price changes for $1 change in underlying asset's price
-- **Gamma**: rate of change of delta for a $1 move in underlying asset; high gamma means delta changes rapidy, so option's price can accelerate in movement
-- **Vega**: sensitivity to volatility i.e. how much option's price changes for a 1% change in implied volatility; high vega means option's value depnds strongly on volatility
-- **Theta**: time decay i.e. how much option's price decreases per day as expiration approaches (all else equal); usually negative for buyers, positive for sellers
-- **Rho**: change in option price for 1% change in interest rates
-
-| Greek    | Measures                                          | Calls (Sign) | Puts (Sign)  | When It’s Largest / Most Important                   |
-|----------|---------------------------------------------------|--------------|--------------|-------------------------------------------------------|
-| Alpha (α)| Excess return vs a benchmark                      |              |              | Portfolio/strategy performance metric; not option-specific |
-| Beta (β)    | Sensitivity to overall market movements           |              |              | Used for stock/portfolio risk; not option-specific    |
-| Delta (Δ) | Change in option premium per $1 change in underlying | + (0 → +1)   | – (0 → –1)   | ATM ~0.5; Deep ITM/OTM near ±1 or 0                    |
-| Gamma (Γ) | Change in delta per $1 change in underlying        | +            | +            | Highest for ATM options near expiration               |
-| Vega (ν)  | Change in premium per 1% change in implied volatility | +            | +            | Highest for ATM, long-dated options                   |
-| Theta (Θ) | Time decay: premium change per day                  | –            | –            | Magnitude highest for ATM near expiration             |
-| Rho (ρ)   | Change in premium per 1% change in interest rates   | +            | –            | Larger for longer-dated options                       |
-
-
-## Concepts
 
 ### Volatlity
 
