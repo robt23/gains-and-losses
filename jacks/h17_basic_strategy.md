@@ -69,7 +69,7 @@ For now, we assume the most common house rules: dealer hits on soft 17 (A6), dou
 **Surrenders:**
 | Player / Dealer   | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | A |
 |-------------------|---|---|---|---|---|---|---|---|----|---|
-| 17                |   |   |   |   |   |   |   |   |    | u |
+| 17                |   |   |   |   |   |   |   |   |    | U |
 | 16                |   |   |   |   |   |   |   | U | U  | U |
 | 15                |   |   |   |   |   |   |   |   | U  | U |
 | 8,8               |   |   |   |   |   |   |   |   |    | U |

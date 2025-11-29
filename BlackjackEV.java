@@ -3,8 +3,6 @@ import random
 import numpy as np
 import threading
 from concurrent.futures import ThreadPoolExecutor
-import itertools
-import pandas as pd
 
 
 class BlackjackEV:
@@ -15,8 +13,7 @@ class BlackjackEV:
         - Dealer hits soft 17 (H17)
         - Blackjack pays 3:2
         - Double allowed on any two cards
-        - Late surrender allowed
-        - Single split allowed (no resplit), double after split OK
+        - No surrender / no splits (yet)
     """
 
     def __init__(self, n_rollouts=10_000, max_depth=10, seed=42, n_workers=None):
@@ -26,11 +23,6 @@ class BlackjackEV:
         self.rng = random.Random(seed)
         self.n_workers = max(1, n_workers or (os.cpu_count() or 4))
         self._local = threading.local()
-        # Memoization to avoid recomputing identical states
-        self._ev_stand_cache = {}
-        self._ev_hit_cache = {}
-        self._ev_double_cache = {}
-        self._ev_split_cache = {}
 
         # Card ranks (2-A) for an infinite deck; each equally likely
         self.cards = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11]
@@ -144,10 +136,6 @@ class BlackjackEV:
     def EV_stand(self, player_total, player_soft, dealer_up, rollouts=None, parallel=True):
         """Expected value from standing immediately."""
         rollouts = rollouts if rollouts is not None else self.n_rollouts
-        cache_key = (player_total, player_soft, dealer_up, rollouts)
-        cached = self._ev_stand_cache.get(cache_key)
-        if cached is not None:
-            return cached
 
         def simulate_once():
             dealer_hand = self.dealer_play(dealer_up)
@@ -163,26 +151,17 @@ class BlackjackEV:
             return 0
 
         results = self._run_parallel(rollouts, simulate_once, parallel=parallel)
-        value = float(np.mean(results))
-        self._ev_stand_cache[cache_key] = value
-        return value
+        return np.mean(results)
 
     # -----------------------------------------------------------
     # EV(hit) – recursive Monte Carlo
     # -----------------------------------------------------------
     def EV_hit(self, cards, dealer_up, depth=0):
-        key = (tuple(sorted(cards)), dealer_up, depth)
-        cached = self._ev_hit_cache.get(key)
-        if cached is not None:
-            return cached
-
         total, soft = self.hand_value(cards)
         if total > 21:
             return -1.0
         if depth >= self.max_depth:
-            value = self.EV_stand(total, soft, dealer_up)
-            self._ev_hit_cache[key] = value
-            return value
+            return self.EV_stand(total, soft, dealer_up)
 
         total_reward = 0.0
         samples = max(10, self.n_rollouts // 100)  # fewer per recursion
@@ -197,19 +176,12 @@ class BlackjackEV:
             ev_hit_next = self.EV_hit(new_cards, dealer_up, depth + 1)
             ev_stand_next = self.EV_stand(new_total, new_soft, dealer_up, parallel=False)
             total_reward += max(ev_hit_next, ev_stand_next)
-        value = total_reward / samples
-        self._ev_hit_cache[key] = value
-        return value
+        return total_reward / samples
 
     # -----------------------------------------------------------
     # EV(double)
     # -----------------------------------------------------------
     def EV_double(self, cards, dealer_up):
-        key = (tuple(sorted(cards)), dealer_up)
-        cached = self._ev_double_cache.get(key)
-        if cached is not None:
-            return cached
-
         samples = max(50, self.n_rollouts // 10)
 
         def simulate_once():
@@ -219,159 +191,30 @@ class BlackjackEV:
             return self.settle(new_cards, dealer_hand, doubled=True)
 
         results = self._run_parallel(samples, simulate_once)
-        value = float(np.mean(results))
-        self._ev_double_cache[key] = value
-        return value
-
-    # -----------------------------------------------------------
-    # EV(split)
-    # -----------------------------------------------------------
-    def EV_split(self, cards, dealer_up):
-        # Only defined for exactly two identical ranks
-        if len(cards) != 2 or cards[0] != cards[1]:
-            return -np.inf
-
-        key = (cards[0], dealer_up)
-        cached = self._ev_split_cache.get(key)
-        if cached is not None:
-            return cached
-
-        samples = max(50, self.n_rollouts // 10)
-
-        def simulate_once():
-            first_hand = [cards[0], self.draw_card()]
-            second_hand = [cards[1], self.draw_card()]
-            ev1 = self.evaluate(
-                first_hand,
-                dealer_up,
-                allow_split=False,
-                allow_surrender=False,
-            )["Best EV"]
-            ev2 = self.evaluate(
-                second_hand,
-                dealer_up,
-                allow_split=False,
-                allow_surrender=False,
-            )["Best EV"]
-            return ev1 + ev2
-
-        results = self._run_parallel(samples, simulate_once)
-        value = float(np.mean(results))
-        self._ev_split_cache[key] = value
-        return value
-
-    # -----------------------------------------------------------
-    # EV(surrender)
-    # -----------------------------------------------------------
-    def EV_surrender(self):
-        # Late surrender: lose half a bet
-        return -0.5
+        return np.mean(results)
 
     # -----------------------------------------------------------
     # Evaluate all actions
     # -----------------------------------------------------------
-    def evaluate(self, cards, dealer_up, allow_split=True, allow_surrender=True):
+    def evaluate(self, cards, dealer_up):
         total, soft = self.hand_value(cards)
         ev_stand = float(self.EV_stand(total, soft, dealer_up))
         ev_hit = float(self.EV_hit(cards, dealer_up))
         ev_double = float(self.EV_double(cards, dealer_up))
-        result = {
+
+        best_action = max(
+            [("Stand", ev_stand), ("Hit", ev_hit), ("Double", ev_double)],
+            key=lambda x: x[1],
+        )[0]
+
+        return {
             "EV(Stand)": ev_stand,
             "EV(Hit)": ev_hit,
             "EV(Double)": ev_double,
+            "Best Action": best_action,
         }
 
-        candidates = [("Stand", ev_stand), ("Hit", ev_hit), ("Double", ev_double)]
 
-        # Surrender only allowed on initial two-card hand
-        if allow_surrender and len(cards) == 2:
-            ev_surrender = self.EV_surrender()
-            result["EV(Surrender)"] = ev_surrender
-            candidates.append(("Surrender", ev_surrender))
-
-        # Split allowed only on identical two-card ranks
-        if allow_split and len(cards) == 2 and cards[0] == cards[1]:
-            ev_split = float(self.EV_split(cards, dealer_up))
-            result["EV(Split)"] = ev_split
-            candidates.append(("Split", ev_split))
-
-        best_action, best_ev = max(candidates, key=lambda x: x[1])
-        result["Best Action"] = best_action
-        result["Best EV"] = best_ev
-        return result
-
-
-# -----------------------------------------------------------
-# Helpers for building a basic-strategy table
-# -----------------------------------------------------------
-def card_to_str(card):
-    return "A" if card == 11 else str(card)
-
-
-def hand_descriptor(sim, cards):
-    total, soft = sim.hand_value(cards)
-    if len(cards) == 2 and cards[0] == cards[1]:
-        label = f"Pair {card_to_str(cards[0])}{card_to_str(cards[1])}"
-        category = "pair"
-    elif soft:
-        label = f"Soft {total}"
-        category = "soft"
-    else:
-        label = f"Hard {total}"
-        category = "hard"
-    hand_str = ",".join(card_to_str(c) for c in sorted(cards, reverse=True))
-    return label, category, total, hand_str
-
-
-def build_basic_strategy_dataframe(sim):
-    """Enumerate all two-card hands against all dealer up-cards into a DataFrame."""
-    dealer_values = sorted(set(sim.cards))
-    hand_combos = list(itertools.combinations_with_replacement(sorted(set(sim.cards)), 2))
-
-    rows = []
-    for dealer_up in dealer_values:
-        for combo in hand_combos:
-            cards = list(combo)
-            label, category, total, hand_str = hand_descriptor(sim, cards)
-            evs = sim.evaluate(cards, dealer_up)
-            rows.append(
-                {
-                    "player_hand": hand_str,
-                    "hand_label": label,
-                    "hand_category": category,
-                    "hand_total": total,
-                    "dealer_up": card_to_str(dealer_up),
-                    "best_action": evs["Best Action"],
-                    "best_ev": evs["Best EV"],
-                    "ev_hit": evs["EV(Hit)"],
-                    "ev_stand": evs["EV(Stand)"],
-                    "ev_double": evs["EV(Double)"],
-                    "ev_surrender": evs.get("EV(Surrender)"),
-                    "ev_split": evs.get("EV(Split)"),
-                }
-            )
-
-    df = pd.DataFrame(rows)
-    # Pivoted grid of best actions (rows grouped by category/total/hand)
-    pivot = (
-        df.pivot_table(
-            index=["hand_category", "hand_total", "hand_label", "player_hand"],
-            columns="dealer_up",
-            values="best_action",
-            aggfunc="first",
-        )
-        .sort_index()
-    )
-    return df, pivot
-
-
-if __name__ == "__main__":
-    # Build a basic-strategy grid; lower rollouts keeps runtime reasonable.
-    sim = BlackjackEV(n_rollouts=50000, n_workers=os.cpu_count())
-    full_df, best_action_grid = build_basic_strategy_dataframe(sim)
-    print("Best action grid (rows grouped by hand type):")
-    
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    print(best_action_grid)
-    # full_df.to_csv("h17_basic_strategy.csv", index=False)
+sim = BlackjackEV(n_rollouts=10000)
+res = sim.evaluate([3, 8], dealer_up=9)
+print(res)
