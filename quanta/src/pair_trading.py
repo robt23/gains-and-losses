@@ -44,7 +44,6 @@ def cointegration_filter(training_df):
                   Only pairs that pass the p-value significance filter.
     """
 
-
     # Define sectors and tickers
     sectors = {
         'Consumer Discretionary': ["XLY", "IYC", "VCR", "XHB"],
@@ -60,43 +59,41 @@ def cointegration_filter(training_df):
         'Real Estate':            ["RWR", "XLRE", "VNQ"]
     }
 
-    # Run Engle–Granger cointegration test on every pair within each sector
     results = []
+
+    # Run Engle–Granger cointegration test on every pair within each sector
     for sector, tickers in sectors.items():
-        # Build the column names for close prices
         close_cols = [f"Close_{t}" for t in tickers if f"Close_{t}" in training_df.columns]
-        
-        # Test all combinations of two ETFs in this sector
+
         for col1, col2 in combinations(close_cols, 2):
             data = training_df[[col1, col2]].dropna()
             if len(data) < 30:
                 # skip pairs with too few overlapping points
                 continue
-            
-            # Record statistics
+
             score, pvalue, _ = coint(data[col1], data[col2])
+            etf1 = col1.replace("Close_", "")
+            etf2 = col2.replace("Close_", "")
+
             results.append({
-                'sector':   sector,
-                'pair':     f"{col1.replace('Close_', '')} & {col2.replace('Close_', '')}",
-                'ETF1': f"{col1.replace('Close_', '')}",
-                'ETF2': f"{col2.replace('Close_', '')}",
-                'adf_stat': score,
-                'p_value':  pvalue
+                "sector":   sector,
+                "pair":     f"{etf1} & {etf2}",
+                "ETF1":     etf1,
+                "ETF2":     etf2,
+                "adf_stat": score,
+                "p_value":  pvalue,
             })
 
     # Compile results into a DataFrame
-    results_df = pd.DataFrame(results).sort_values(['sector', 'p_value'])
-    results_df = results_df.reset_index(drop=True)
-
+    results_df = pd.DataFrame(results).sort_values(["sector", "p_value"]).reset_index(drop=True)
 
     # Keep likely cointegrated pairs (p < 0.05)
-    sig = results_df[results_df['p_value'] < 0.05]
-    sig = sig.reset_index(drop=True)
+    sig = results_df[results_df["p_value"] < 0.05].reset_index(drop=True)
 
     # Save to CSV
-    results_df.to_csv('../data/all_cointegration_results.csv', index=True)
-    sig.to_csv('../data/significant_cointegrated_pairs.csv', index=True)
-    
+    results_df.to_csv("../data/all_cointegration_results.csv", index=True)
+    sig.to_csv("../data/significant_cointegrated_pairs.csv", index=True)
+
     return sig
 
 
@@ -134,11 +131,9 @@ def calculate_spreads(backtesting_df, sig):
         This output is intended as the input to `generate_signals()`.
     """
 
-    # Get pairs
-    pairs = sig['pair'].str.split(' & ').apply(tuple).tolist()
+    pairs = sig["pair"].str.split(" & ").apply(tuple).tolist()
     results = []
 
-    # Iterate through pairs and calculate spread, half-life
     for etf1, etf2 in pairs:
         col1 = f"Close_{etf1}"
         col2 = f"Close_{etf2}"
@@ -168,41 +163,23 @@ def calculate_spreads(backtesting_df, sig):
         spread_lag = spread_lag.dropna()
         spread_ret = spread_ret.dropna()
 
-        # Calculate half life
         if len(spread_lag) > 0:
             hl_model = sm.OLS(spread_ret, sm.add_constant(spread_lag)).fit()
-            if len(hl_model.params) > 1:
-                phi = hl_model.params.iloc[1]
-            else:
-                phi = np.nan
-            half_life = -np.log(2) / phi if phi < 0 else np.nan
+            # params: [const, phi]
+            phi = hl_model.params.iloc[1] if len(hl_model.params) > 1 else np.nan
+            half_life = -np.log(2) / phi if (phi is not np.nan and phi < 0) else np.nan
         else:
             half_life = np.nan
 
-        # Record statistics
         results.append({
             "ETF1": etf1,
             "ETF2": etf2,
             "alpha": alpha,
             "hedge_ratio": beta,
             "half_life": half_life,
-            "spread_prices": pair_df  # includes Close_ETF1, Close_ETF2, spread
+            "spread_prices": pair_df,  # includes Close_ETF1, Close_ETF2, spread
         })
-        
-        # def spread_graphs():
-        #     for r in results:
-        #         print(f"{r['ETF1']} & {r['ETF2']} → hedge ratio: {r['hedge_ratio']:.4f}")
-        #         print(r['spread_prices'].head(), "\n")
-            
-        #         sns.lineplot(data=r['spread_prices']['spread'])
-        #         plt.axhline(y=r['mean'], color='red', linestyle='--', linewidth=2)
-        #         plt.xlabel('Date')
-        #         plt.ylabel('Spread')
-        #         plt.title(f"{r['ETF1']} & {r['ETF2']} Spread Over Time")
-        #         plt.show()
-        
-        # spread_graphs()
-    
+
     return results
 
 
@@ -252,25 +229,10 @@ def generate_signals(spreads, entry_z=2.0, exit_z=0.5, default_window=60):
                 - "pair_return": Theoretical spread return 
                 - "strategy_return": Return after applying held position
                 - "cum_return": Geometrically compounded cumulative return
-
-    Notes:
-        - `signal` represents instantaneous trade-entry impulses only.  
-          `position` represents the actual held trade across time.
-
-        - The strategy enters only when flat and exits only when the spread 
-          reverts inside the exit threshold.
-
-        - One-period lag (`position.shift(1)`) is applied to avoid look-ahead 
-          bias when computing strategy returns.
-
-        - Cumulative returns are computed as:
-              cum_return = (1 + strategy_return).cumprod() - 1
     """
-
 
     trades = {}
 
-    # Iterate through each spread DataFrame
     for sp in spreads:
         etf1, etf2 = sp["ETF1"], sp["ETF2"]
         hr = sp["hedge_ratio"]
@@ -293,23 +255,22 @@ def generate_signals(spreads, entry_z=2.0, exit_z=0.5, default_window=60):
 
         # Raw entry signals
         df["signal"] = 0
-        df.loc[df["zscore"] >  entry_z, "signal"] = -1   # short spread
-        df.loc[df["zscore"] < -entry_z, "signal"] =  1   # long spread
+        df.loc[df["zscore"] > entry_z, "signal"] = -1   # short spread
+        df.loc[df["zscore"] < -entry_z, "signal"] = 1   # long spread
 
-        # Turn discrete signals into held positions until exit;  1/-1 after 0 means enter, subsequent 1/-1's mean hold, 0 after 1/-1 means exit
+        # Convert impulses -> held positions
         df["position"] = 0
         current_position = 0
-        
 
         for i in range(len(df)):
             z = df["zscore"].iloc[i]
             s = df["signal"].iloc[i]
 
-            # Entry
             if current_position == 0 and s != 0:
+                # Enter new position
                 current_position = s
-            # Exit
             elif current_position != 0 and abs(z) < exit_z:
+                # Exit existing position
                 current_position = 0
 
             df.iat[i, df.columns.get_loc("position")] = current_position
@@ -318,92 +279,232 @@ def generate_signals(spreads, entry_z=2.0, exit_z=0.5, default_window=60):
         df["r1"] = np.log(df[col1]).diff()
         df["r2"] = np.log(df[col2]).diff()
 
-        # Pair return (before applying position)
+        # Pair return (spread return before position)
         df["pair_return"] = df["r1"] - hr * df["r2"]
 
-        # Strategy return = position * pair_return (use yesterday's position)
+        # Strategy return with 1-bar lag on position
         df["strategy_return"] = df["position"].shift(1) * df["pair_return"]
-
-        # Clean NaNs for cumulative metrics
         df["strategy_return"] = df["strategy_return"].fillna(0.0)
 
-        # Cumulative return curve
+        # Cumulative return
         df["cum_return"] = (1 + df["strategy_return"]).cumprod() - 1
 
-        trades[f"{etf1} & {etf2}"] = df[[
-            col1, col2,
-            "spread", "mu", "sd", "zscore", "signal",
-            "position", "pair_return", "strategy_return", "cum_return"
-        ]]
-
+        trades[f"{etf1} & {etf2}"] = df[
+            [col1, col2, "spread", "mu", "sd", "zscore",
+             "signal", "position", "pair_return", "strategy_return", "cum_return"]
+        ]
 
     return trades
 
 
-def performance_metrics(trades, trading_days=252):
+def extract_trades(trades):
     """
-    Computes performance statistics for each cointegrated ETF pair's trading
-    strategy, including cumulative return, annualized volatility, Sharpe ratio,
-    and maximum drawdown.
+    Extracts trade-level information from the per-pair backtest results.
 
-    This function evaluates the time series of strategy returns generated by
-    `generate_signals()` and summarizes key risk and performance metrics commonly
-    used in quantitative finance. Each pair's results are collected into a
-    summary table and ranked by Sharpe ratio.
+    For each pair, this function scans the `position` time series and identifies
+    individual trades as contiguous periods where position != 0. A new trade is
+    opened when position changes from 0 to +1/-1, and closed when position
+    returns to 0 or flips sign (e.g., +1 → -1 or -1 → +1). For each trade, it
+    records entry/exit timestamps, side (long/short spread), z-scores, spread
+    values, holding period, and compounded strategy return.
+    """
+    all_trades = []
+
+    for pair, df in trades.items():
+        df = df.copy()
+        pos = df["position"].values
+        idx = df.index
+
+        current_side = 0        # +1 (long spread), -1 (short spread), 0 (flat)
+        entry_i = None          # index into df for entry row
+
+        for i in range(len(df)):
+            p = pos[i]
+
+            # Case 1: flat → possible new entry
+            if current_side == 0:
+                if p != 0:
+                    current_side = p
+                    entry_i = i
+
+            # Case 2: already in a trade
+            else:
+                close_trade = False
+                new_entry_after_flip = False
+
+                if p == 0:
+                    close_trade = True
+                elif np.sign(p) != np.sign(current_side):
+                    # flip sign = close + immediately re-enter
+                    close_trade = True
+                    new_entry_after_flip = True
+
+                if close_trade and entry_i is not None:
+                    exit_i = i
+
+                    seg = df.iloc[entry_i:exit_i + 1]
+                    strat = seg["strategy_return"]
+                    trade_ret = (1.0 + strat).prod() - 1.0
+                    holding_period = len(seg)
+
+                    entry_row = df.iloc[entry_i]
+                    exit_row = df.iloc[exit_i]
+
+                    all_trades.append({
+                        "pair": pair,
+                        "side": "long" if current_side > 0 else "short",
+                        "entry_time": idx[entry_i],
+                        "exit_time": idx[exit_i],
+                        "holding_period": holding_period,
+                        "entry_z": entry_row.get("zscore", np.nan),
+                        "exit_z": exit_row.get("zscore", np.nan),
+                        "entry_spread": entry_row.get("spread", np.nan),
+                        "exit_spread": exit_row.get("spread", np.nan),
+                        "trade_return": trade_ret,
+                    })
+
+                    if new_entry_after_flip:
+                        current_side = p
+                        entry_i = i
+                    else:
+                        current_side = 0
+                        entry_i = None
+
+    if not all_trades:
+        return pd.DataFrame(columns=[
+            "pair", "side", "entry_time", "exit_time", "holding_period",
+            "entry_z", "exit_z", "entry_spread", "exit_spread", "trade_return"
+        ])
+
+    trade_log = pd.DataFrame(all_trades)
+    trade_log = trade_log.sort_values(["pair", "entry_time"]).reset_index(drop=True)
+    return trade_log
+
+
+def summarize_trades(trade_log, min_trades=5):
+    """
+    Summarize trade-level performance per pair.
+
+    Returns a filtered table of "good" pairs with:
+      - positive expectancy
+      - win_rate > 0.55
+      - at least `min_trades` completed trades
+    """
+    if trade_log.empty:
+        return trade_log
+
+    grp = trade_log.groupby("pair")
+
+    summary = grp["trade_return"].agg(
+        n_trades="count",
+        win_rate=lambda x: (x > 0).mean(),
+        avg_trade_return="mean",
+        med_trade_return="median",
+        std_trade_return="std",
+    )
+
+    summary["expectancy"] = summary["avg_trade_return"]
+    summary["avg_holding"] = grp["holding_period"].mean()
+
+    summary = summary.sort_values("expectancy", ascending=False)
+
+    good_pairs = summary[
+        (summary["expectancy"] > 0) &
+        (summary["win_rate"] > 0.55) &
+        (summary["n_trades"] >= min_trades)
+    ]
+
+    return good_pairs
+
+
+def portfolio_metrics(trades, trading_days=252):
+    """
+    Computes portfolio-level performance by equally weighting all pairs.
 
     Args:
         trades (Dict[str, Pandas DataFrame]):
-            Output from `generate_signals()`. Keys are pair labels such as 
-            "XLY & VCR". Each DataFrame must contain:
-                - "strategy_return": daily position-weighted PnL
-                - "cum_return": cumulative strategy return
-                Additional columns (prices, spread, zscore, etc.) are optional.
-
-        trading_days (int, default=252):
-            Number of trading days in a year. Used to annualize mean return
-            and volatility.
+            Output from `generate_signals()`. Each DataFrame must contain
+            "strategy_return".
 
     Returns:
-        Pandas DataFrame:
-            Summary table where each row corresponds to an ETF pair, with:
-                - "pair": pair label
-                - "cumulative_return": total return over the full backtest
-                - "annualized_vol": annualized standard deviation of returns
-                - "sharpe": Sharpe ratio (annualized return / annualized vol)
-                - "max_drawdown": worst peak-to-trough drawdown of equity curve
-
-            The returned DataFrame is sorted in descending order of Sharpe ratio.
+        (sharpe, max_dd, cum_ret):
+            sharpe   : annualized Sharpe ratio of the equal-weighted portfolio
+            max_dd   : maximum drawdown of the portfolio equity curve
+            cum_ret  : cumulative portfolio return over the full period
     """
+    if not trades:
+        return np.nan, np.nan, np.nan
 
-    summary = []
+    returns = [df["strategy_return"] for df in trades.values()]
+    merged = pd.concat(returns, axis=1).fillna(0.0)
+    port_r = merged.mean(axis=1)
 
-    for pair, df in trades.items():
-        r = df["strategy_return"]
-        cum_ret = df["cum_return"].iloc[-1]
-        
-        # Annualized volatility
-        vol = r.std() * np.sqrt(trading_days)
-        
-        # Sharpe ratio
-        sharpe = r.mean() * trading_days / vol if vol > 0 else np.nan
+    vol = port_r.std() * np.sqrt(trading_days)
+    sharpe = port_r.mean() * trading_days / vol if vol > 0 else np.nan
 
-        # Max drawdown
-        cum_equity = (1 + r).cumprod()
-        peak = cum_equity.cummax()
-        dd = (cum_equity - peak) / peak
-        max_dd = dd.min()
+    equity = (1 + port_r).cumprod()
+    peak = equity.cummax()
+    dd = (equity - peak) / peak
+    max_dd = dd.min()
+    cum_ret = equity.iloc[-1] - 1.0
 
-        # Record statistics
-        summary.append({
-            "pair": pair,
-            "cumulative_return": cum_ret,
-            "annualized_vol": vol,
-            "sharpe": sharpe,
-            "max_drawdown": max_dd
-        })
+    return sharpe, max_dd, cum_ret
 
-    return pd.DataFrame(summary).sort_values("sharpe", ascending=False)
 
+def parameter_sweep(training_df, backtesting_df,
+                    entry_grid=(1.5, 2.0, 2.5),
+                    exit_grid=(0.25, 0.5, 0.75),
+                    window_grid=(30, 60, 90),
+                    trading_days=252):
+    """
+    Runs a grid search over entry_z, exit_z, and window length.
+    Returns a DataFrame of aggregate portfolio metrics per parameter combo.
+    """
+    records = []
+
+    for entry_z in entry_grid:
+        for exit_z in exit_grid:
+            if exit_z >= entry_z:
+                continue
+
+            for window in window_grid:
+                (port_sharpe, port_max_dd, port_cum_ret), trade_log, trades = run_backtest(
+                    training_df,
+                    backtesting_df,
+                    entry_z=entry_z,
+                    exit_z=exit_z,
+                    default_window=window,
+                    trading_days=trading_days,
+                )
+
+                if trade_log.empty:
+                    n_trades = 0
+                    win_rate = np.nan
+                    avg_trade_return = np.nan
+                else:
+                    n_trades = len(trade_log)
+                    win_rate = (trade_log["trade_return"] > 0).mean()
+                    avg_trade_return = trade_log["trade_return"].mean()
+
+                records.append({
+                    "entry_z": entry_z,
+                    "exit_z": exit_z,
+                    "window": window,
+                    "portfolio_sharpe": port_sharpe,
+                    "portfolio_max_dd": port_max_dd,
+                    "portfolio_cum_return": port_cum_ret,
+                    "n_trades": n_trades,
+                    "win_rate": win_rate,
+                    "avg_trade_return": avg_trade_return,
+                })
+
+                print(
+                    f"Done: entry_z={entry_z}, exit_z={exit_z}, window={window}, "
+                    f"Sharpe={port_sharpe:.3f}, n_trades={n_trades}"
+                )
+
+    sweep_df = pd.DataFrame(records)
+    return sweep_df.sort_values("portfolio_sharpe", ascending=False)
 
 
 def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
@@ -415,7 +516,6 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
       (2,1) Z-Score + thresholds + Position
       (2,2) Equity Curve + Drawdown
     """
-
     if pair not in trades:
         raise ValueError(f"Pair '{pair}' not found in trades dictionary.")
 
@@ -445,20 +545,18 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     peak = equity.cummax()
     drawdown = (equity - peak) / peak
 
-    # ---- Create 2x2 layout ----
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
     fig.suptitle(f"Pairs Trading Analysis: {pair}", fontsize=18, y=0.98)
-
     ax11, ax12, ax21, ax22 = axes.flatten()
 
-    # ---------------- Panel (1,1): Prices ----------------
+    # (1,1) Normalized prices
     sns.lineplot(x=df.index, y=price1_norm, ax=ax11, label=etf1)
     sns.lineplot(x=df.index, y=price2_norm, ax=ax11, label=etf2)
     ax11.set_title("Normalized Prices")
     ax11.set_ylabel("Normalized")
     ax11.legend(loc="upper left")
 
-    # ---------------- Panel (1,2): Spread Bands ----------------
+    # (1,2) Spread + bands
     sns.lineplot(x=df.index, y=df["spread"], ax=ax12, label="Spread", linewidth=1.2)
     ax12.plot(df.index, df["mu"], linestyle="--", label="Rolling Mean")
     ax12.plot(df.index, upper_entry, linestyle=":", label=f"+{entry_z}σ (entry)")
@@ -466,16 +564,18 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     ax12.plot(df.index, upper_exit, linestyle="-.", label=f"+{exit_z}σ (exit)")
     ax12.plot(df.index, lower_exit, linestyle="-.", label=f"-{exit_z}σ (exit)")
 
-    # Markers
-    ax12.scatter(long_entries.index, long_entries["spread"], marker="^", s=45, color="green", label="Long Entry")
-    ax12.scatter(short_entries.index, short_entries["spread"], marker="v", s=45, color="red", label="Short Entry")
-    ax12.scatter(exits.index, exits["spread"], marker="o", s=40, color="orange", label="Exit")
+    ax12.scatter(long_entries.index, long_entries["spread"], marker="^", s=45,
+                 color="green", label="Long Entry")
+    ax12.scatter(short_entries.index, short_entries["spread"], marker="v", s=45,
+                 color="red", label="Short Entry")
+    ax12.scatter(exits.index, exits["spread"], marker="o", s=40,
+                 color="orange", label="Exit")
 
     ax12.set_title("Spread with Rolling Bands")
     ax12.set_ylabel("Spread")
     ax12.legend(loc="upper left")
 
-    # ---------------- Panel (2,1): Z-score + position ----------------
+    # (2,1) Z-score + position
     sns.lineplot(x=df.index, y=df["zscore"], ax=ax21, label="Z-Score")
     ax21.axhline(entry_z, linestyle="--", color="red", linewidth=0.8)
     ax21.axhline(-entry_z, linestyle="--", color="red", linewidth=0.8)
@@ -485,14 +585,14 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     ax21.set_title("Z-Score and Position")
     ax21.set_ylabel("Z-Score")
 
-    # Position overlay
     ax21b = ax21.twinx()
-    ax21b.step(df.index, df["position"], where="post", color="purple", alpha=0.6, label="Position")
+    ax21b.step(df.index, df["position"], where="post", color="purple",
+               alpha=0.6, label="Position")
     ax21b.set_ylim(-1.2, 1.2)
     ax21b.set_yticks([-1, 0, 1])
     ax21b.set_ylabel("Position")
 
-    # ---------------- Panel (2,2): Equity & Drawdown ----------------
+    # (2,2) Equity & drawdown
     sns.lineplot(x=df.index, y=equity, ax=ax22, label="Equity")
     ax22.set_title("Equity Curve and Drawdown")
     ax22.set_ylabel("Equity Index")
@@ -502,29 +602,115 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     ax22b.set_ylabel("Drawdown")
     ax22b.set_ylim(drawdown.min() * 1.05, 0)
 
-    # Tight layout
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
 
+def run_backtest(training_df, backtesting_df,
+                 entry_z=2.0, exit_z=0.5, default_window=60,
+                 trading_days=252):
+    """
+    Convenience wrapper to run the full pipeline for a given parameter set.
+
+    Returns:
+        perf      : (portfolio_sharpe, portfolio_max_dd, portfolio_cum_ret)
+        trade_log : DataFrame with one row per completed trade
+        trades    : Dict[str, DataFrame] with per-pair time series
+    """
+    sig = cointegration_filter(training_df)
+    spreads = calculate_spreads(backtesting_df, sig)
+    trades = generate_signals(spreads, entry_z=entry_z,
+                              exit_z=exit_z,
+                              default_window=default_window)
+    perf = portfolio_metrics(trades, trading_days=trading_days)
+    trade_log = extract_trades(trades)
+    return perf, trade_log, trades
+
+
+def make_walk_forward_splits(df, train_years=3, test_years=1, step_years=1):
+    """
+    Generates (train_start, train_end, test_start, test_end) date ranges
+    for walk-forward analysis based on years.
+    """
+    dates = df.index.sort_values()
+    start_date = dates.min()
+    end_date = dates.max()
+
+    splits = []
+    current_train_start = start_date
+
+    while True:
+        train_end = current_train_start + pd.DateOffset(years=train_years) - pd.DateOffset(days=1)
+        test_start = train_end + pd.DateOffset(days=1)
+        test_end = test_start + pd.DateOffset(years=test_years) - pd.DateOffset(days=1)
+
+        if test_end > end_date:
+            break
+
+        splits.append((current_train_start, train_end, test_start, test_end))
+        current_train_start = current_train_start + pd.DateOffset(years=step_years)
+
+    return splits
+
+
+def walk_forward_backtest(all_prices_df,
+                          train_years=3, test_years=1, step_years=1,
+                          entry_z=2.0, exit_z=0.5, default_window=60,
+                          trading_days=252):
+    """
+    Performs walk-forward backtests across multiple train/test windows.
+    Returns a DataFrame of fold-level portfolio metrics.
+    """
+    splits = make_walk_forward_splits(all_prices_df, train_years, test_years, step_years)
+    records = []
+
+    for (train_start, train_end, test_start, test_end) in splits:
+        train_df = all_prices_df.loc[train_start:train_end]
+        test_df = all_prices_df.loc[test_start:test_end]
+
+        print(f"Fold: train {train_start.date()}–{train_end.date()}, "
+              f"test {test_start.date()}–{test_end.date()}")
+
+        (port_sharpe, port_max_dd, port_cum_ret), trade_log, trades = run_backtest(
+            train_df,
+            test_df,
+            entry_z=entry_z,
+            exit_z=exit_z,
+            default_window=default_window,
+            trading_days=trading_days,
+        )
+
+        n_trades = len(trade_log)
+
+        records.append({
+            "train_start": train_start,
+            "train_end": train_end,
+            "test_start": test_start,
+            "test_end": test_end,
+            "portfolio_sharpe": port_sharpe,
+            "portfolio_max_dd": port_max_dd,
+            "portfolio_cum_return": port_cum_ret,
+            "n_trades": n_trades,
+        })
+
+    return pd.DataFrame(records).sort_values("test_start")
 
 
 def main():
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    training_df = pd.read_csv('../data/training.csv', index_col=0, parse_dates=True)
-    backtesting_df = pd.read_csv('../data/backtesting.csv', index_col=0, parse_dates=True)
-    sig = cointegration_filter(training_df)
-    spreads = calculate_spreads(backtesting_df, sig)
-    trades = generate_signals(spreads)
-    perf = performance_metrics(trades)
-    
-    sns.set_theme(style="whitegrid")
+    all_prices_df = pd.read_csv("../data/all_prices.csv", index_col=0, parse_dates=True)
 
-    pair = "XLY & VCR"
-    plot_pair(trades, pair, entry_z=2.0, exit_z=0.5)
-    
-    
+    wf_results = walk_forward_backtest(
+        all_prices_df,
+        train_years=3,
+        test_years=1,
+        step_years=1,
+        entry_z=2.0,
+        exit_z=0.5,
+        default_window=60,
+    )
+    print(wf_results)
+    wf_results.to_csv("walk_forward_results.csv", index=False)
+
 
 if __name__ == "__main__":
     main()

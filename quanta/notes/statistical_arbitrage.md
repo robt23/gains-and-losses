@@ -1,13 +1,9 @@
 # Algorithmic Trading: Statistical Arbitrage (Pairs Trading)
-Main source: "Quantitative Trading: How to Build Your Own Algorithmic Trading Business" by Ernie Chan
-
-Other sources: 
-
-[Arbitrage Strategies: Understanding Working of Statistical Arbitrage](https://blog.quantinsti.com/statistical-arbitrage/)
-
-[Pairs Trading for Beginners: Correlation, Cointegration, Examples, and Strategy Steps](https://blog.quantinsti.com/pairs-trading-basics/)
-
-[Augmented Dickey Fuller (ADF) Test for a Pairs Trading Strategy](https://blog.quantinsti.com/augmented-dickey-fuller-adf-test-for-a-pairs-trading-strategy/)
+Sources: 
+- "Quantitative Trading: How to Build Your Own Algorithmic Trading Business" by Ernie Chan
+- [Arbitrage Strategies: Understanding Working of Statistical Arbitrage](https://blog.quantinsti.com/statistical-arbitrage/)
+- [Pairs Trading for Beginners: Correlation, Cointegration, Examples, and Strategy Steps](https://blog.quantinsti.com/pairs-trading-basics/)
+- [Augmented Dickey Fuller (ADF) Test for a Pairs Trading Strategy](https://blog.quantinsti.com/augmented-dickey-fuller-adf-test-for-a-pairs-trading-strategy/)
 
 
 
