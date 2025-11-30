@@ -12,6 +12,15 @@ from src.data_prep import prepare_master_dataframe
 
 
 def main():
+    """
+    Command-line entry point for building and saving the master feature DataFrame.
+
+    Prompts the user for a date range and output path, then constructs a
+    multi-ETF, macro-augmented, feature-rich DataFrame and writes it to CSV.
+
+    Returns:
+        None
+    """
     # Interactive prompts for dates and output path
     start_date = input("Enter start date (YYYY-MM-DD): ").strip()
     end_date = input("Enter end date (YYYY-MM-DD): ").strip()
@@ -25,45 +34,41 @@ def main():
         "DGS10":  "yield10Y"  # 10-year Treasury yield
     }
 
-    # Prepare and merge data
     df = prepare_master_dataframe(
-        # etfs=["SPY", "VOO", "IVV"],
         etfs=[
-            
-            # consumer discretionary: 
+            # consumer discretionary:
             "XLY", "IYC", "VCR", "XHB",
-            
+
             # consumer staples:
             "XLP", "IYK", "VDC",
-            
+
             # energy:
             "XLE", "IYE", "VDE", "XOP", "AMLP", "OIH",
-            
+
             # financials:
             "XLF", "IYF", "VFH", "KBE", "KRE",
-            
+
             # healthcare:
             "XLV", "IYH", "IBB", "XBI", "VHT",
-            
+
             # industrials:
             "XLI", "IYJ", "VIS",
-            
+
             # materials:
             "XLB", "IYM", "VAW", "GDX", "GDXJ",
-            
+
             # information technology:
             "XLK", "IYW", "VGT", "FDN", "IGV",
-            
-            # communication servies:
+
+            # communication services:
             "IYZ", "VOX", "XLC",
-            
+
             # utilities:
             "XLU", "IDU", "VPU",
-            
+
             # real estate:
-            "RWR", "XLRE", "VNQ"
-            
-            ],
+            "RWR", "XLRE", "VNQ",
+        ],
         start_date=start_date,
         end_date=end_date,
         fred_map=fred_map

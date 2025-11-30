@@ -1,0 +1,2 @@
+n_trades,win_rate,avg_trade_return,med_trade_return,std_trade_return,expectancy,avg_holding
+5,0.6,0.003856389087194856,0.006596855877247343,0.009142274461430247,0.003856389087194856,19.8

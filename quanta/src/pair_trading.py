@@ -5,6 +5,8 @@ import statsmodels.api as sm
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
 
 
 def cointegration_filter(training_df):
@@ -91,8 +93,8 @@ def cointegration_filter(training_df):
     sig = results_df[results_df["p_value"] < 0.05].reset_index(drop=True)
 
     # Save to CSV
-    results_df.to_csv("../data/all_cointegration_results.csv", index=True)
-    sig.to_csv("../data/significant_cointegrated_pairs.csv", index=True)
+    # results_df.to_csv("../data/all_cointegration_results.csv", index=True)
+    # sig.to_csv("../data/significant_cointegrated_pairs.csv", index=True)
 
     return sig
 
@@ -299,14 +301,22 @@ def generate_signals(spreads, entry_z=2.0, exit_z=0.5, default_window=60):
 
 def extract_trades(trades):
     """
-    Extracts trade-level information from the per-pair backtest results.
+    Convert position time-series into discrete trade records.
 
-    For each pair, this function scans the `position` time series and identifies
-    individual trades as contiguous periods where position != 0. A new trade is
-    opened when position changes from 0 to +1/-1, and closed when position
-    returns to 0 or flips sign (e.g., +1 → -1 or -1 → +1). For each trade, it
-    records entry/exit timestamps, side (long/short spread), z-scores, spread
-    values, holding period, and compounded strategy return.
+    A trade is defined as a continuous period where position ≠ 0. This function
+    detects entries, exits, and sign flips, and records holding period and
+    compounded returns for each completed trade.
+
+    Args:
+        trades (dict[str, pd.DataFrame]):
+            Output from `generate_signals()`, containing per-pair backtest data.
+
+    Returns:
+        pd.DataFrame:
+            One row per trade with columns:
+            pair, side, entry_time, exit_time, holding_period, entry_z,
+            exit_z, entry_spread, exit_spread, trade_return.
+            Empty DataFrame if no trades occurred.
     """
     all_trades = []
 
@@ -383,13 +393,25 @@ def extract_trades(trades):
 
 def summarize_trades(trade_log, min_trades=5):
     """
-    Summarize trade-level performance per pair.
+    Summarize trade-level performance for each ETF pair.
 
-    Returns a filtered table of "good" pairs with:
-      - positive expectancy
-      - win_rate > 0.55
-      - at least `min_trades` completed trades
+    Computes win rate, expectancy, and distribution statistics for trade
+    returns. Filters to “good pairs” meeting minimum performance criteria.
+
+    Args:
+        trade_log (pd.DataFrame):
+            Output of `extract_trades()`.
+
+        min_trades (int):
+            Minimum number of completed trades required to include the pair.
+
+    Returns:
+        pd.DataFrame:
+            A table of pairs with:
+            n_trades, win_rate, avg_trade_return, med_trade_return,
+            std_trade_return, expectancy, avg_holding.
     """
+
     if trade_log.empty:
         return trade_log
 
@@ -419,19 +441,25 @@ def summarize_trades(trade_log, min_trades=5):
 
 def portfolio_metrics(trades, trading_days=252):
     """
-    Computes portfolio-level performance by equally weighting all pairs.
+    Compute portfolio-level performance assuming equal weighting of all pairs.
+
+    Merges all pair return streams, averages them to form a portfolio return
+    series, and computes Sharpe ratio, maximum drawdown, and total cumulative
+    return.
 
     Args:
-        trades (Dict[str, Pandas DataFrame]):
-            Output from `generate_signals()`. Each DataFrame must contain
-            "strategy_return".
+        trades (dict[str, pd.DataFrame]):
+            Output from `generate_signals()`. Each DataFrame must include
+            a 'strategy_return' column.
+
+        trading_days (int):
+            Number of trading days used for annualization.
 
     Returns:
-        (sharpe, max_dd, cum_ret):
-            sharpe   : annualized Sharpe ratio of the equal-weighted portfolio
-            max_dd   : maximum drawdown of the portfolio equity curve
-            cum_ret  : cumulative portfolio return over the full period
+        tuple:
+            (sharpe, max_drawdown, cumulative_return)
     """
+
     if not trades:
         return np.nan, np.nan, np.nan
 
@@ -451,70 +479,31 @@ def portfolio_metrics(trades, trading_days=252):
     return sharpe, max_dd, cum_ret
 
 
-def parameter_sweep(training_df, backtesting_df,
-                    entry_grid=(1.5, 2.0, 2.5),
-                    exit_grid=(0.25, 0.5, 0.75),
-                    window_grid=(30, 60, 90),
-                    trading_days=252):
+def plot_pair(trades, pair, entry_z, exit_z, window):
     """
-    Runs a grid search over entry_z, exit_z, and window length.
-    Returns a DataFrame of aggregate portfolio metrics per parameter combo.
-    """
-    records = []
+    Plot a 4-panel diagnostic view for a single ETF pair.
 
-    for entry_z in entry_grid:
-        for exit_z in exit_grid:
-            if exit_z >= entry_z:
-                continue
+    Panels include:
+        (1) Normalized ETF prices
+        (2) Spread with rolling mean and entry/exit bands
+        (3) Z-score with position overlay
+        (4) Equity curve with drawdown
 
-            for window in window_grid:
-                (port_sharpe, port_max_dd, port_cum_ret), trade_log, trades = run_backtest(
-                    training_df,
-                    backtesting_df,
-                    entry_z=entry_z,
-                    exit_z=exit_z,
-                    default_window=window,
-                    trading_days=trading_days,
-                )
+    Args:
+        trades (dict[str, pd.DataFrame]):
+            Output from `generate_signals()`.
 
-                if trade_log.empty:
-                    n_trades = 0
-                    win_rate = np.nan
-                    avg_trade_return = np.nan
-                else:
-                    n_trades = len(trade_log)
-                    win_rate = (trade_log["trade_return"] > 0).mean()
-                    avg_trade_return = trade_log["trade_return"].mean()
+        pair (str):
+            Pair label in the form "ETF1 & ETF2".
 
-                records.append({
-                    "entry_z": entry_z,
-                    "exit_z": exit_z,
-                    "window": window,
-                    "portfolio_sharpe": port_sharpe,
-                    "portfolio_max_dd": port_max_dd,
-                    "portfolio_cum_return": port_cum_ret,
-                    "n_trades": n_trades,
-                    "win_rate": win_rate,
-                    "avg_trade_return": avg_trade_return,
-                })
+        entry_z (float):
+            Entry z-score threshold, shown on the plot.
 
-                print(
-                    f"Done: entry_z={entry_z}, exit_z={exit_z}, window={window}, "
-                    f"Sharpe={port_sharpe:.3f}, n_trades={n_trades}"
-                )
+        exit_z (float):
+            Exit z-score threshold.
 
-    sweep_df = pd.DataFrame(records)
-    return sweep_df.sort_values("portfolio_sharpe", ascending=False)
-
-
-def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
-    """
-    Creates a 2x2 window-pane layout visualization for a given pair.
-    Panels:
-      (1,1) Normalized ETF Prices
-      (1,2) Spread + rolling mean + entry/exit bands + markers
-      (2,1) Z-Score + thresholds + Position
-      (2,2) Equity Curve + Drawdown
+    Returns:
+        None. Displays a matplotlib figure.
     """
     if pair not in trades:
         raise ValueError(f"Pair '{pair}' not found in trades dictionary.")
@@ -546,7 +535,7 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     drawdown = (equity - peak) / peak
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    fig.suptitle(f"Pairs Trading Analysis: {pair}", fontsize=18, y=0.98)
+    fig.suptitle(f"Pairs Trading Analysis: {pair}, entry_z {entry_z}, exit_z {exit_z}, window {window}", fontsize=18, y=0.98)
     ax11, ax12, ax21, ax22 = axes.flatten()
 
     # (1,1) Normalized prices
@@ -603,19 +592,38 @@ def plot_pair(trades, pair, entry_z=2.0, exit_z=0.5):
     ax22b.set_ylim(drawdown.min() * 1.05, 0)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.show()
-
+    return fig
 
 def run_backtest(training_df, backtesting_df,
                  entry_z=2.0, exit_z=0.5, default_window=60,
                  trading_days=252):
     """
-    Convenience wrapper to run the full pipeline for a given parameter set.
+    Execute a full backtest pipeline for a single parameter configuration.
+
+    Runs: cointegration → spread modeling → signal generation → portfolio
+    evaluation → trade extraction.
+
+    Args:
+        training_df (pd.DataFrame):
+            Training data for cointegration estimation.
+
+        backtesting_df (pd.DataFrame):
+            Out-of-sample data for trading evaluation.
+
+        entry_z, exit_z (float):
+            Z-score thresholds for the strategy.
+
+        default_window (int):
+            Default rolling window for z-scores.
+
+        trading_days (int):
+            Annualization constant.
 
     Returns:
-        perf      : (portfolio_sharpe, portfolio_max_dd, portfolio_cum_ret)
-        trade_log : DataFrame with one row per completed trade
-        trades    : Dict[str, DataFrame] with per-pair time series
+        tuple:
+            perf      : (Sharpe, max_drawdown, cumulative_return)
+            trade_log : DataFrame of trades
+            trades    : Dict of per-pair time series
     """
     sig = cointegration_filter(training_df)
     spreads = calculate_spreads(backtesting_df, sig)
@@ -629,9 +637,29 @@ def run_backtest(training_df, backtesting_df,
 
 def make_walk_forward_splits(df, train_years=3, test_years=1, step_years=1):
     """
-    Generates (train_start, train_end, test_start, test_end) date ranges
-    for walk-forward analysis based on years.
+    Generate chronological train/test splits for walk-forward analysis.
+
+    Uses year-based offsets to roll training windows forward and create
+    non-overlapping test periods.
+
+    Args:
+        df (pd.DataFrame):
+            Full price DataFrame indexed by datetime.
+
+        train_years (int):
+            Length of training window.
+
+        test_years (int):
+            Length of test window.
+
+        step_years (int):
+            Step size before generating the next split.
+
+    Returns:
+        list[tuple]:
+            List of (train_start, train_end, test_start, test_end) timestamps.
     """
+
     dates = df.index.sort_values()
     start_date = dates.min()
     end_date = dates.max()
@@ -658,9 +686,32 @@ def walk_forward_backtest(all_prices_df,
                           entry_z=2.0, exit_z=0.5, default_window=60,
                           trading_days=252):
     """
-    Performs walk-forward backtests across multiple train/test windows.
-    Returns a DataFrame of fold-level portfolio metrics.
+    Perform multi-period walk-forward backtests across rolling windows.
+
+    For each train/test split, runs the full backtest pipeline and records
+    portfolio-level performance.
+
+    Args:
+        all_prices_df (pd.DataFrame):
+            Complete price history indexed by date.
+
+        train_years, test_years, step_years (int):
+            Window lengths and step size for walk-forward splitting.
+
+        entry_z, exit_z (float):
+            Z-score thresholds for the strategy.
+
+        default_window (int):
+            Rolling window length for z-score estimation.
+
+        trading_days (int):
+            Annualization constant.
+
+    Returns:
+        pd.DataFrame:
+            Fold-level results sorted by test_start date.
     """
+
     splits = make_walk_forward_splits(all_prices_df, train_years, test_years, step_years)
     records = []
 
@@ -696,20 +747,119 @@ def walk_forward_backtest(all_prices_df,
     return pd.DataFrame(records).sort_values("test_start")
 
 
+def walk_forward_parameter_sweep(all_prices_df,
+                                 train_years=3, test_years=1, step_years=1,
+                                 entry_grid=(1.5, 2.0, 2.5),
+                                 exit_grid=(0.25, 0.5, 0.75),
+                                 window_grid=(30, 60, 90),
+                                 trading_days=252):
+    """
+    Combine walk-forward evaluation with a grid search of strategy parameters.
+
+    For every train/test split and every combination of entry/exit thresholds
+    and rolling window, runs a full backtest and records the results.
+
+    Returns one row per (split, parameter set).
+    """
+    splits = make_walk_forward_splits(all_prices_df, train_years, test_years, step_years)
+    records = []
+    
+    plot_dir = Path("trade_plots")
+    plot_dir.mkdir(exist_ok=True)
+    log_dir = Path("trade_logs")
+    log_dir.mkdir(exist_ok=True)
+    summary_dir = Path("trade_summaries")
+    summary_dir.mkdir(exist_ok=True)
+
+    for fold_idx, (train_start, train_end, test_start, test_end) in enumerate(splits, start=1):
+        train_df = all_prices_df.loc[train_start:train_end]
+        test_df = all_prices_df.loc[test_start:test_end]
+
+        print(f"Fold {fold_idx}: train {train_start.date()}–{train_end.date()}, "
+              f"test {test_start.date()}–{test_end.date()}")
+
+        for entry_z in entry_grid:
+            for exit_z in exit_grid:
+                if exit_z >= entry_z:
+                    continue
+
+                for window in window_grid:
+                    (port_sharpe, port_max_dd, port_cum_ret), trade_log, trades = run_backtest(
+                        train_df,
+                        test_df,
+                        entry_z=entry_z,
+                        exit_z=exit_z,
+                        default_window=window,
+                        trading_days=trading_days,
+                    )
+                    
+                    for pair in trades:
+                        plot_path = plot_dir / (f"fold{fold_idx}_entry{entry_z}_exit{exit_z}_window{window}_{pair}.png")
+                        fig = plot_pair(trades, pair, entry_z, exit_z, window)
+                        fig.savefig(plot_path, dpi=300, bbox_inches="tight")
+                        plt.close(fig)
+                    
+                    log_path = log_dir / (f"fold{fold_idx}_entry{entry_z}_exit{exit_z}_window{window}_log.csv")
+                    trade_log.to_csv(log_path, index=False)
+
+                    trade_summary = summarize_trades(trade_log)
+                    summary_path = summary_dir / (
+                        f"fold{fold_idx}_entry{entry_z}_exit{exit_z}_window{window}_summary.csv"
+                    )
+                    trade_summary.to_csv(summary_path, index=False)
+
+                    if trade_log.empty:
+                        n_trades = 0
+                        win_rate = np.nan
+                        avg_trade_return = np.nan
+                    else:
+                        n_trades = len(trade_log)
+                        win_rate = (trade_log["trade_return"] > 0).mean()
+                        avg_trade_return = trade_log["trade_return"].mean()
+
+                    records.append({
+                        "fold": fold_idx,
+                        "train_start": train_start,
+                        "train_end": train_end,
+                        "test_start": test_start,
+                        "test_end": test_end,
+                        "entry_z": entry_z,
+                        "exit_z": exit_z,
+                        "window": window,
+                        "portfolio_sharpe": port_sharpe,
+                        "portfolio_max_dd": port_max_dd,
+                        "portfolio_cum_return": port_cum_ret,
+                        "n_trades": n_trades,
+                        "win_rate": win_rate,
+                        "avg_trade_return": avg_trade_return,
+                    })
+
+                    print(
+                        f"  Done params entry_z={entry_z}, exit_z={exit_z}, window={window}"
+                    )
+
+    results = pd.DataFrame(records)
+    if results.empty:
+        return results
+
+    return results.sort_values(["test_start", "entry_z", "exit_z", "window"])
+
+
 def main():
     all_prices_df = pd.read_csv("../data/all_prices.csv", index_col=0, parse_dates=True)
 
-    wf_results = walk_forward_backtest(
+    wf_results = walk_forward_parameter_sweep(
         all_prices_df,
         train_years=3,
         test_years=1,
         step_years=1,
-        entry_z=2.0,
-        exit_z=0.5,
-        default_window=60,
+        entry_grid=(1.5, 2.0, 2.5),
+        exit_grid=(0.25, 0.5, 0.75),
+        window_grid=(30, 60, 90),
     )
-    print(wf_results)
     wf_results.to_csv("walk_forward_results.csv", index=False)
+    
+    sys.exit()
 
 
 if __name__ == "__main__":
